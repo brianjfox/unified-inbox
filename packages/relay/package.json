@@ -1,0 +1,35 @@
+{
+  "name": "@inbox/relay",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@corbits/artifacts": "0.2.0",
+    "@corbits/mailbox": "0.2.0",
+    "@intx/db": "0.5.0",
+    "@intx/hub-api": "0.5.0",
+    "@intx/authz": "0.5.0",
+    "@intx/types": "0.5.0",
+    "@intx/log": "0.5.0",
+    "@intx/mailbox": "0.5.0",
+    "@intx/mime": "0.5.0",
+    "drizzle-orm": "^0.45.1",
+    "hono": "^4.11.9",
+    "hono-openapi": "^1.2.0",
+    "postgres": "^3.4.0",
+    "@standard-community/standard-json": "^0.3.6",
+    "@standard-community/standard-openapi": "^0.2.10",
+    "@electric-sql/pglite": "^0.3.0",
+    "@electric-sql/pglite-socket": "^0.2.13",
+    "@inbox/shared": "workspace:*",
+    "arktype": "^2.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

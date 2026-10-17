@@ -1,0 +1,10 @@
+{
+  "name": "@inbox/seed",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "bin": { "seed": "./seed.ts" },
+  "scripts": { "seed": "node --experimental-strip-types --no-warnings seed.ts", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@inbox/connector-hub": "workspace:*", "@inbox/shared": "workspace:*", "better-sqlite3": "^12.0.0" },
+  "devDependencies": { "@types/node": "^24.0.0", "@types/better-sqlite3": "^7.6.0" }
+}

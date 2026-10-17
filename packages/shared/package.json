@@ -1,0 +1,27 @@
+{
+  "name": "@inbox/shared",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./crypto": "./src/crypto.ts",
+    "./schema": "./src/schema.ts",
+    "./protocol": "./src/protocol.ts",
+    "./relay-client": "./src/relay-client.ts",
+    "./deeplink": "./src/deeplink.ts",
+    "./mail": "./src/mail.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "libsodium-wrappers-sumo": "0.7.15",
+    "arktype": "^2.1.0"
+  },
+  "devDependencies": {
+    "@types/libsodium-wrappers-sumo": "^0.7.8",
+    "@types/node": "^24.0.0"
+  }
+}

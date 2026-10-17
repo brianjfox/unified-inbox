@@ -1,0 +1,16 @@
+{
+  "name": "unified-inbox",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["packages/*"],
+  "type": "module",
+  "scripts": {
+    "dev": "bun run scripts/dev.ts",
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/bun": "latest"
+  }
+}
