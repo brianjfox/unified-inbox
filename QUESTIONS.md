@@ -48,3 +48,15 @@ Not decisions, but gaps you should know about before relying on the acceptance c
 - No Windows machine or Windows code-signing certificate was available, so the Windows shell build, its signature, and the Windows halves of AC-11 and AC-21 are unverified.
 - The DigitalOcean provisioning script was not run against a real droplet or host from this machine, so AC-P4's live round-trip is unverified. Its two parameter paths were exercised in dry-run mode only.
 - The macOS reboot drill (AC-1) and the phone-browser pass (AC-28) need your hands.
+
+## 7. Small connector choices made during the build
+
+Each is the smallest reading of the documents; say so if you want a different one.
+
+- **iMessage tapbacks are skipped.** Messages stores reactions ("Loved …", "Liked …") as message rows; the inbox skips them so a reaction never shows as a message, matching how Messages itself displays them.
+- **iMessage names come from Messages, not Contacts.** A one-to-one chat is named by its handle (phone number or email) unless Messages has a display name. Reading Contacts needs a second permission grant and is not in the documents.
+- **WhatsApp history on first link.** The messages WhatsApp sends when a device first links are ingested within the 14-day window, so a fresh link shows recent chats rather than an empty list.
+- **WhatsApp relink logs the old device out first**, so the phone's linked-device list stays accurate (FR-4).
+- **Slack names prefer the display name**, then the real name, then the handle. Slack's `team.info` call is not made because it needs a scope the design does not list; the workspace name and domain come from `auth.test`.
+- **Transient states show as "error" with a since-time.** The status schema has no "connecting" state, so Slack's Socket Mode connect window and WhatsApp's reconnect after a restart report `error` with a detail line saying they are connecting. Adding a `connecting` state would be a one-line schema change plus a card variant.
+- **A Slack message with only files** gets the body "Sent a file" so its preview is not blank.

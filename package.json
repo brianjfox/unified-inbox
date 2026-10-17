@@ -2,12 +2,17 @@
   "name": "unified-inbox",
   "private": true,
   "version": "0.1.0",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "type": "module",
   "scripts": {
     "dev": "bun run scripts/dev.ts",
+    "build:gui": "bun run --cwd packages/gui build",
     "typecheck": "bun run --filter '*' typecheck",
-    "test": "bun test"
+    "test": "bun test packages/shared packages/relay packages/gui packages/provision && bun run --cwd packages/connector-hub test",
+    "seed": "bun run --cwd packages/seed seed",
+    "manual:screenshots": "bun run scripts/manual-screenshots.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
