@@ -42,6 +42,9 @@ export const ViewerBoundEvent = type({
 );
 export type ViewerBoundEvent = typeof ViewerBoundEvent.infer;
 
+/** A reply as a handler builds it, before the transport adds id, at and inReplyTo. */
+export type ViewerReply = ViewerBoundEvent extends infer E ? (E extends unknown ? Omit<E, "id" | "at" | "inReplyTo"> : never) : never;
+
 /** Subject every protocol mail carries, so anything else in the folder is ignored. */
 export const PROTOCOL_SUBJECT = "unified-inbox/1";
 

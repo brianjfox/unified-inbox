@@ -1,0 +1,19 @@
+{
+  "name": "@inbox/provision",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Idempotent DigitalOcean provisioning for the Unified Inbox relay (ADR-7). Drives doctl, ssh and rsync; rerun it to upgrade.",
+  "bin": {
+    "provision": "./provision.ts"
+  },
+  "scripts": {
+    "provision": "bun run provision.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.0"
+  }
+}

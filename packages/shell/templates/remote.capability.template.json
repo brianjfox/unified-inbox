@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "remote-gui",
+  "description": "Lets the GUI served by the relay (and only that origin) call the shell's two commands: platform and open_deep_link.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["__INBOX_RELAY_URL_PATTERN__"]
+  },
+  "permissions": ["allow-platform", "allow-open-deep-link"]
+}
