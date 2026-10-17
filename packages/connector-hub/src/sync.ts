@@ -42,8 +42,44 @@ export class SyncClient {
     return this.devices;
   }
 
-  /** Uploads every dirty conversation. Safe to call often; a no-op when clean. */
-  async flush(): Promise<number> {
+  private flushing: Promise<number> | null = null;
+  private flushAgain = false;
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Uploads every dirty conversation. Safe to call often: one flush runs at a
+   * time, and a call made while one is running schedules exactly one more
+   * after it, so a burst of changes never creates duplicate artifacts.
+   */
+  flush(): Promise<number> {
+    if (this.flushing) {
+      this.flushAgain = true;
+      return this.flushing;
+    }
+    this.flushing = (async () => {
+      let total = 0;
+      do {
+        this.flushAgain = false;
+        total += await this.flushOnce();
+      } while (this.flushAgain && !this.stopped);
+      return total;
+    })().finally(() => {
+      this.flushing = null;
+    });
+    return this.flushing;
+  }
+
+  /** Coalesces a burst of changes into one flush shortly after the last one. */
+  scheduleFlush(delayMs = 500): void {
+    if (this.flushTimer) clearTimeout(this.flushTimer);
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      void this.flush().catch((err) => this.log.error("flush failed", { error: String(err) }));
+    }, delayMs);
+    this.timers.push(this.flushTimer);
+  }
+
+  private async flushOnce(): Promise<number> {
     const dirty = this.store.dirtyConversations();
     let n = 0;
     for (const { row, state } of dirty) {

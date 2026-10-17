@@ -46,9 +46,7 @@ export async function runHub(): Promise<() => Promise<void>> {
     ["imessage", imessage],
     ["whatsapp", whatsapp],
   ]);
-  const normalizer = new Normalizer(store, connectors, log, () => {
-    void sync.flush().catch((err) => log.error("flush failed", { error: String(err) }));
-  });
+  const normalizer = new Normalizer(store, connectors, log, () => sync.scheduleFlush());
 
   const status = (): HubStatus => ({
     v: 1,

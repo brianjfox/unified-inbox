@@ -136,3 +136,45 @@ describe("normalizer", () => {
     n.rename("slack", "nope", "x");
   });
 });
+
+describe("sync client flush", () => {
+  test("concurrent flushes never create an artifact twice", async () => {
+    const { SyncClient } = await import("../src/sync.ts");
+    const store = new HubStore(":memory:");
+    let created = 0;
+    let revised = 0;
+    const relay = {
+      async createConversation(title: string) {
+        created++;
+        await new Promise((r) => setTimeout(r, 5));
+        return { artifact: { id: `art_${title}`, version: 1 } };
+      },
+      async reviseArtifact(id: string) {
+        revised++;
+        return { artifactId: id, version: 2 };
+      },
+    };
+    const identity = { relay, inboxKey: "k".repeat(43), keys: { publicKey: "", secretKey: "" }, deviceId: "dev_x", device: {} } as never;
+    // sealBlob needs a real key; use a generated one.
+    const crypto = await import("@inbox/shared/crypto");
+    await crypto.ready();
+    (identity as { inboxKey: string }).inboxKey = await crypto.generateInboxKey();
+    const sync = new SyncClient(identity, store, silent, { mailDomain: "x" });
+    for (let i = 0; i < 20; i++) {
+      store.putConversation({ v: 1, service: "slack", conversationId: `C${i}`, name: `c${i}`, isGroup: false, messages: [], lastMessageAt: "2026-01-01T00:00:00Z", preview: "", unread: false, unreadCount: 0, link: {} });
+    }
+    await Promise.all(Array.from({ length: 50 }, () => sync.flush()));
+    assert.equal(created, 20);
+    assert.equal(store.dirtyConversations().length, 0);
+    // A change during a flush is picked up by the follow-up pass, as a revision.
+    const p = sync.flush();
+    store.putConversation({ v: 1, service: "slack", conversationId: "C0", name: "renamed", isGroup: false, messages: [], lastMessageAt: "2026-01-01T00:00:00Z", preview: "", unread: false, unreadCount: 0, link: {} });
+    await sync.flush();
+    await p;
+    assert.equal(created, 20);
+    assert.equal(revised, 1);
+    assert.equal(store.dirtyConversations().length, 0);
+    sync.stop();
+    store.close();
+  });
+});
