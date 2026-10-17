@@ -1,6 +1,7 @@
 import * as crypto from "@inbox/shared/crypto";
 import { RelayError } from "@inbox/shared/relay-client";
-import { HubBoundEvent, type ViewerBoundEvent, conversationArtifactTitle, newEventId } from "@inbox/shared/protocol";
+import { HubBoundEvent, type ViewerBoundEvent, type ViewerReply, conversationArtifactTitle, newEventId } from "@inbox/shared/protocol";
+import { type } from "arktype";
 import type { DeviceRecord, HubStatus } from "@inbox/shared/schema";
 import type { HubIdentity } from "./identity.ts";
 import type { HubStore } from "./store.ts";
@@ -12,7 +13,8 @@ import type { Logger } from "./connectors/types.ts";
  * viewer events, handing each to a dispatcher. The hub is the sole writer of
  * artifacts (FR-9, ADR-5).
  */
-export type EventDispatcher = (event: HubBoundEvent, from: DeviceRecord, reply: (e: Omit<ViewerBoundEvent, "id" | "at" | "inReplyTo">) => Promise<void>) => Promise<void>;
+export type ReplyFn = (e: ViewerReply) => Promise<void>;
+export type EventDispatcher = (event: HubBoundEvent, from: DeviceRecord, reply: ReplyFn) => Promise<void>;
 
 export class SyncClient {
   private devices = new Map<string, DeviceRecord>();
@@ -99,19 +101,20 @@ export class SyncClient {
         const from = devices.get(env.from);
         if (!from) throw new Error(`event from unknown device ${env.from}`);
         const parsed = HubBoundEvent(env.body);
-        if (parsed instanceof Error || "summary" in (parsed as object)) {
-          this.log.warn("ignoring malformed event", { from: env.from, summary: (parsed as { summary?: string }).summary });
+        if (parsed instanceof type.errors) {
+          this.log.warn("ignoring malformed event", { from: env.from, summary: parsed.summary });
         } else if (this.store.hasProcessedEvent(parsed.id)) {
           this.log.debug("skipping duplicate event", { id: parsed.id });
         } else {
-          const reply = async (e: Omit<ViewerBoundEvent, "id" | "at" | "inReplyTo">) => {
-            await this.sendToViewer(from, { ...(e as ViewerBoundEvent), id: newEventId(), at: new Date().toISOString(), inReplyTo: parsed.id });
+          const reply: ReplyFn = async (e) => {
+            const full = { ...e, id: newEventId(), at: new Date().toISOString(), inReplyTo: parsed.id } as ViewerBoundEvent;
+            await this.sendToViewer(from, full);
           };
           try {
             await dispatch(parsed, from, reply);
           } catch (err) {
             this.log.error("event failed", { type: parsed.type, error: String(err) });
-            await reply({ type: "reply.error", message: err instanceof Error ? err.message : String(err) } as never);
+            await reply({ type: "reply.error", message: err instanceof Error ? err.message : String(err) });
           }
           this.store.rememberEvent(parsed.id);
           handled++;

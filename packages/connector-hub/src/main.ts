@@ -6,7 +6,7 @@ import { loadConfig, ConfigError } from "./config.ts";
 import { createMacKeychain, KeychainError } from "./keychain.ts";
 import { HubStore, conversationKey } from "./store.ts";
 import { establishIdentity, approveFirstViewerIfNeeded, EnrollmentPendingError } from "./identity.ts";
-import { SyncClient } from "./sync.ts";
+import { SyncClient, type ReplyFn } from "./sync.ts";
 import { Normalizer } from "./normalizer.ts";
 import { createLogger } from "./log.ts";
 import type { Connector, ConnectorHost } from "./connectors/types.ts";
@@ -63,7 +63,7 @@ export async function runHub(): Promise<() => Promise<void>> {
   /** One active WhatsApp link attempt at a time; a new request cancels the old. */
   let cancelLink: (() => void) | null = null;
 
-  const dispatch = async (event: HubBoundEvent, from: { id: string; label: string }, reply: Parameters<Parameters<SyncClient["pollMailbox"]>[0]>[2]) => {
+  const dispatch = async (event: HubBoundEvent, from: { id: string; label: string }, reply: ReplyFn) => {
     log.info("event", { type: event.type, from: from.label });
     switch (event.type) {
       case "triage.markRead":
@@ -95,12 +95,12 @@ export async function runHub(): Promise<() => Promise<void>> {
       case "whatsapp.link": {
         cancelLink?.();
         cancelLink = await whatsapp.link({
-          onQr: (qr) => void reply({ type: "whatsapp.qr", qr }).catch((e) => log.warn("qr reply failed", { error: String(e) })),
+          onQr: (qr: string) => void reply({ type: "whatsapp.qr", qr }).catch((e) => log.warn("qr reply failed", { error: String(e) })),
           onLinked: () => {
             statusDirty = true;
             void reply({ type: "whatsapp.linked" }).catch((e) => log.warn("linked reply failed", { error: String(e) }));
           },
-          onError: (message) => void reply({ type: "reply.error", message }).catch(() => undefined),
+          onError: (message: string) => void reply({ type: "reply.error", message }).catch(() => undefined),
         });
         return;
       }
