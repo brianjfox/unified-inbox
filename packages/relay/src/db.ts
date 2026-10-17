@@ -14,7 +14,10 @@ export type Relay = ReturnType<typeof createDB> & { grantStore: ReturnType<typeo
  * that: a rerun is the upgrade path).
  */
 export async function migrate(config: DBConfig): Promise<void> {
-  await runMigrations(config, { schema: "public" });
+  // Interchange's own runner replays every migration file and keeps no ledger,
+  // so it runs once per database; the relay records that it ran. The artifacts
+  // and mailbox runners are idempotent and run every start.
+  await ensureIntxMigrations(config);
   await runArtifactMigrations(config, { schema: "public" });
   await runMailboxMigrations(config, { schema: "public" });
   const { db, close } = createDB(config);
@@ -37,6 +40,29 @@ export async function migrate(config: DBConfig): Promise<void> {
         status_sealed text,
         created_at timestamptz NOT NULL DEFAULT now()
       )`);
+  } finally {
+    await close();
+  }
+}
+
+const INTX_DB_VERSION = "0.5.0";
+
+async function ensureIntxMigrations(config: DBConfig): Promise<void> {
+  const { db, close } = createDB(config);
+  try {
+    await db.execute(sql`CREATE SCHEMA IF NOT EXISTS inbox_relay`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS inbox_relay.ledger (name text PRIMARY KEY, version text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`);
+    const rows = Array.from((await db.execute(sql`SELECT version FROM inbox_relay.ledger WHERE name = 'intx-db'`)) as Iterable<{ version: string }>);
+    const applied = rows[0]?.version;
+    if (applied === INTX_DB_VERSION) return;
+    if (applied && applied !== INTX_DB_VERSION) {
+      throw new Error(
+        `The database was migrated by @intx/db ${applied} and this relay bundles ${INTX_DB_VERSION}. Interchange's migration runner cannot upgrade in place; restore from a fresh database (every conversation is re-synced by the hub) or pin @intx/db to ${applied}.`,
+      );
+    }
+    const tenantTable = Array.from((await db.execute(sql`SELECT 1 AS present FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'tenant'`)) as Iterable<unknown>);
+    if (tenantTable.length === 0) await runMigrations(config, { schema: "public" });
+    await db.execute(sql`INSERT INTO inbox_relay.ledger(name, version) VALUES ('intx-db', ${INTX_DB_VERSION}) ON CONFLICT (name) DO UPDATE SET version = excluded.version, applied_at = now()`);
   } finally {
     await close();
   }

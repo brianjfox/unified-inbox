@@ -38,6 +38,8 @@ beforeAll(async () => {
   await crypto.ready();
   await resetDatabase();
   await migrate(dbConfig);
+  // Every start migrates again; a second run must be a no-op, not a failure.
+  await migrate(dbConfig);
   relay = openRelayDb(dbConfig);
   await ensureTenant(relay, config.tenant);
   const app = createRelayApp(relay, config);
