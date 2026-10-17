@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { timeWindowEvaluator } from "@intx/authz";
 import { createRequireGrant } from "@intx/hub-api";
 import { createArtifactRoutes, InlineContentStore } from "@corbits/artifacts";
-import { createInMemoryMailboxEventBus, createMailboxRoutes, resolveMailboxRecipients, writeMailboxMessage } from "@corbits/mailbox";
+import { createInMemoryMailboxEventBus, createMailboxRoutes, openNativeMailboxStore, purgePrincipalMailbox, resolveMailboxRecipients, writeMailboxMessage } from "@corbits/mailbox";
 import { bodyOfFrame, headerOfFrame } from "@inbox/shared/mail";
 import type { RelayConfig } from "./config.ts";
 import type { Relay } from "./db.ts";
@@ -74,6 +74,18 @@ export function createRelayApp(relay: Relay, config: RelayConfig): Hono {
       },
     }),
   );
+
+  // Housekeeping: the mailbox module files a copy of every send in Sent and
+  // every trashed event in Trash, and offers no delete. A device that has
+  // emptied its INBOX may purge its whole mailbox; the check keeps an
+  // unprocessed event from being lost.
+  approvedApp.post("/mailbox/me/purge", async (c) => {
+    const principal = c.get("principal");
+    const inbox = await openNativeMailboxStore(relay.db as never, { tenantId, principalId: principal.id, folder: "INBOX" });
+    if (inbox.messages.length > 0) return c.json({ purged: 0, skipped: "INBOX is not empty" });
+    const purged = await purgePrincipalMailbox(relay.db as never, { tenantId, principalId: principal.id });
+    return c.json({ purged });
+  });
 
   tenantApp.route("/", approvedApp);
   app.route(`/api/tenants/${tenantId}`, tenantApp);

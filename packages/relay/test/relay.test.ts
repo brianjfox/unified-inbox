@@ -127,6 +127,13 @@ describe("relay", () => {
     expect(() => crypto.openEnvelope(inbox[0]!.body, hubKeys, () => strangerKeys.publicKey)).toThrow();
     await hub.mailboxTrash(inbox[0]!.uid);
     expect((await hub.mailboxList()).length).toBe(0);
+    // Housekeeping: the hub's Trash and the viewer's Sent copies can be purged.
+    expect((await hub.mailboxPurge()).purged).toBeGreaterThan(0);
+    expect((await viewer.mailboxPurge()).purged).toBeGreaterThan(0);
+    // A device with unprocessed mail is refused.
+    await viewer.mailboxSend(enrolledHub.device.id, config.tenant.domain, envelope);
+    expect((await hub.mailboxPurge()).skipped).toBeDefined();
+    await hub.mailboxTrash((await hub.mailboxList())[0]!.uid);
 
     // Heartbeat and status.
     await hub.heartbeat(crypto.sealBlob(inboxKey, { v: 1, at: new Date().toISOString() }));

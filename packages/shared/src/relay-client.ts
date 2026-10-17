@@ -193,6 +193,11 @@ export class RelayClient {
     return this.request("POST", `${this.tenantPath}/mailbox/me/inbox/${uid}/trash?folder=${encodeURIComponent(folder)}`, {});
   }
 
+  /** Purges this device's whole mailbox (Sent, Trash) once its INBOX is empty. */
+  mailboxPurge(): Promise<{ purged: number; skipped?: string }> {
+    return this.request("POST", `${this.tenantPath}/mailbox/me/purge`, {});
+  }
+
   mailboxMarkRead(uid: number, folder = "INBOX"): Promise<unknown> {
     return this.request("POST", `${this.tenantPath}/mailbox/me/inbox/${uid}/read?folder=${encodeURIComponent(folder)}`, {});
   }

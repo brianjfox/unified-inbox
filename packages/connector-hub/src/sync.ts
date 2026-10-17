@@ -78,10 +78,16 @@ export class SyncClient {
     await this.identity.relay.mailboxSend(viewer.principalId, this.domain, sealed);
   }
 
+  private polls = 0;
+
   /** One mailbox pass: open every sealed event, dispatch it, trash it. */
   async pollMailbox(dispatch: EventDispatcher): Promise<number> {
     const messages = await this.identity.relay.mailboxList();
-    if (messages.length === 0) return 0;
+    if (messages.length === 0) {
+      // Every ~5 minutes of quiet, purge Sent and Trash so the mailbox stays small.
+      if (++this.polls % 100 === 0) await this.identity.relay.mailboxPurge().catch(() => undefined);
+      return 0;
+    }
     const devices = await this.refreshDevices(true);
     let handled = 0;
     for (const m of messages.sort((a, b) => a.uid - b.uid)) {
