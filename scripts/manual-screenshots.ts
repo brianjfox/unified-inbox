@@ -20,6 +20,10 @@ const OUT = new URL("../docs/manual/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 
 async function highlight(page: Page, testId: string | null, label: string) {
+  if (testId) {
+    await page.locator(`[data-testid="${testId}"]`).first().scrollIntoViewIfNeeded();
+    await page.waitForTimeout(250);
+  }
   await page.evaluate(({ testId, label }) => {
     document.querySelectorAll("[data-manual-highlight]").forEach((n) => n.remove());
     if (!testId) return;
@@ -67,25 +71,24 @@ async function shot(page: Page, name: string, testId: string | null, label: stri
 }
 
 async function waitForInbox(page: Page) {
-  await page.goto(BASE + "/");
-  // A fresh browser context is a new device: it enrolls and waits for the hub.
+  // The hub approves the first viewer within about 15 seconds; the first sync follows.
   await page.waitForSelector('[data-testid="conversation-list"]', { timeout: 120_000 });
 }
 
-const browser = await chromium.launch();
+// A persistent profile: the browser is one device, enrolled once, and a rerun
+// of this script reuses it instead of enrolling another device.
+const PROFILE = new URL("../tmp/manual-browser-profile/", import.meta.url).pathname;
+mkdirSync(PROFILE, { recursive: true });
+const ctx = await chromium.launchPersistentContext(PROFILE, { viewport: { width: 1280, height: 800 } });
 try {
-  // 08: the loading / waiting state is what a brand-new device sees first.
-  {
-    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-    const page = await ctx.newPage();
-    await page.goto(BASE + "/");
-    await page.waitForSelector('[data-testid="loading-skeleton-list"]', { timeout: 30_000 });
-    await shot(page, "08-loading", "loading-sync-status", "Status while connecting");
-    await ctx.close();
-  }
-
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-  const page = await ctx.newPage();
+  const page = ctx.pages()[0] ?? (await ctx.newPage());
+  await page.goto(BASE + "/");
+  // The loading state is what a new device sees while waiting for approval.
+  const first = await Promise.race([
+    page.waitForSelector('[data-testid="loading-skeleton-list"]', { timeout: 30_000 }).then(() => "loading" as const),
+    page.waitForSelector('[data-testid="conversation-list"]', { timeout: 30_000 }).then(() => "inbox" as const),
+  ]);
+  if (first === "loading") await shot(page, "08-loading", "loading-sync-status", "Status while connecting");
   await waitForInbox(page);
   await page.waitForTimeout(1500);
   await shot(page, "01-inbox", "conversation-list", "Every conversation, newest first");
@@ -125,6 +128,12 @@ try {
   await page.click('[data-testid="button-mark-all-read"]');
   await page.waitForSelector('[data-testid="empty-state"]', { timeout: 15_000 });
   await shot(page, "07-empty", "empty-state", "Nothing is waiting");
+  // Let the hub confirm the mark-all-read before it is paused below, so the
+  // offline picture shows the offline state alone.
+  await page.waitForTimeout(12_000);
+  if ((await page.locator('[data-testid="banner-action-error"]').count()) > 0) {
+    throw new Error("the hub did not confirm mark all read; check the hub log");
+  }
 
   // 09: hub offline. Pause the hub so heartbeats stop; the viewer notices after 90s.
   const hubPid = Number(process.env.HUB_PID ?? 0);
@@ -139,7 +148,6 @@ try {
   } else {
     console.log("HUB_PID not set: skipping 09-offline.png");
   }
-  await ctx.close();
 } finally {
-  await browser.close();
+  await ctx.close();
 }

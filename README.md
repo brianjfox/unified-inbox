@@ -148,6 +148,17 @@ Runs the connectors' initial sync (the last 14 days) through the normal pipeline
 
 Reboot the Mac once and confirm the hub is back (`launchctl print gui/$(id -u)/com.unified-inbox.hub`, and the Connections screen's hub card). That is AC-1.
 
+### Manual pictures
+
+`docs/USER-MANUAL.md` is illustrated with pictures taken from the running application. To refresh them after a change, start the dev stack and run the capture against it:
+
+```sh
+bun run dev                                                   # terminal 1
+HUB_PID=$(pgrep -f connector-hub/src/main.ts) bun run manual:screenshots   # terminal 2
+```
+
+It drives a headless browser through the main flow (enrollment and approval, the inbox, a thread, search, phone width, Connections, mark all read, and the hub-offline state, which it produces by pausing the hub for the staleness window) and writes `docs/manual/*.png`. The pictures show whatever is in the inbox at the time, so review them before sharing the manual.
+
 ## Operations
 
 - **Logs:** hub in `~/Library/Logs/UnifiedInbox/hub.log` and `hub.err.log`; relay via `journalctl -u unified-inbox-relay`.

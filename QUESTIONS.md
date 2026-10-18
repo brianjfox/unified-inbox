@@ -60,3 +60,16 @@ Each is the smallest reading of the documents; say so if you want a different on
 - **Slack names prefer the display name**, then the real name, then the handle. Slack's `team.info` call is not made because it needs a scope the design does not list; the workspace name and domain come from `auth.test`.
 - **Transient states show as "error" with a since-time.** The status schema has no "connecting" state, so Slack's Socket Mode connect window and WhatsApp's reconnect after a restart report `error` with a detail line saying they are connecting. Adding a `connecting` state would be a one-line schema change plus a card variant.
 - **A Slack message with only files** gets the body "Sent a file" so its preview is not blank.
+
+## 8. Small GUI choices made during the build
+
+- **Pending approval** shows the loading screen with "Connecting to hub…" plus one line, "This device is waiting for approval from another device." When the relay itself is unreachable the status reads "Can't reach the sync server" and retries every 5 seconds.
+- **Opening a conversation while the hub is offline** shows it read-only and changes no read state; viewers queue nothing (ADR-5).
+- **The empty state** appears when nothing is unread, no search is active, the hub is online, and no thread is open, so reading the last unread thread does not pull the pane away. Mark all read clears the selection, which is how AC-8 lands on the empty state.
+- **A Connections link** sits at the bottom of the inbox sidebar (the design shows only the way back from Connections to the inbox).
+- **Row test ids** are slugs of the conversation name, as in the design; two conversations with the same name on different services would share a slug.
+- **The iMessage pane subline and card** state that Messages keeps its own badge whenever the hub reports read-back as unavailable (item 3).
+- **Group threads** prefix each message with its sender, and your own messages are tinted and right-aligned.
+- **Sync problems** (an undecryptable artifact, a relay error) are shown as text on the hub card, not in the inbox list.
+- **The SQLite WebAssembly cache** uses the package's documented worker path (`sqlite3.oo1.OpfsDb` in a module Worker) rather than the deprecated Worker1 promiser the build plan's task 4 implied.
+- **Device labels** default to "<Browser> on <OS>", or "Desktop app on <OS>" in the shell.
