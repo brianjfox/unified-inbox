@@ -1,9 +1,9 @@
 import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
-import { mkdtempSync, rmSync, chmodSync, copyFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, chmodSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { InboxEvent } from "@inbox/shared/schema";
 import { HubStore } from "../src/store.ts";
 import type { HubConfig } from "../src/config.ts";
@@ -11,6 +11,8 @@ import type { ConnectorHost, Logger } from "../src/connectors/types.ts";
 import { ReadBackUnavailableError } from "../src/connectors/types.ts";
 import { createIMessageConnector, IMESSAGE_CURSOR_KEY, appleDateToIso } from "../src/connectors/imessage.ts";
 import { decodeAttributedBody } from "../src/connectors/imessage/attributed-body.ts";
+import { ContactsDirectory, CONTACTS_DB_FILENAME, digitsOf, displayNameOf } from "../src/connectors/imessage/contacts.ts";
+import type { ConversationState } from "@inbox/shared/schema";
 
 // ---- fixtures ---------------------------------------------------------------
 
@@ -161,7 +163,7 @@ function seedScenario(f: Fixture): void {
 
 // ---- fake host (the hub side of the contract) -------------------------------
 
-type FakeHost = ConnectorHost & { events: InboxEvent[]; statusChanges: number };
+type FakeHost = ConnectorHost & { events: InboxEvent[]; statusChanges: number; renames: Array<{ conversationId: string; name: string }> };
 
 const silentLog: Logger = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -169,10 +171,13 @@ function fakeHost(): FakeHost {
   const host: FakeHost = {
     events: [],
     statusChanges: 0,
+    renames: [],
     onMessage(event) {
       host.events.push(event);
     },
-    onConversationRenamed() {},
+    onConversationRenamed(_service, conversationId, name) {
+      host.renames.push({ conversationId, name });
+    },
     onStatusChanged() {
       host.statusChanges++;
     },
@@ -181,7 +186,7 @@ function fakeHost(): FakeHost {
   return host;
 }
 
-function configFor(dbPath: string): HubConfig {
+function configFor(dbPath: string, contactsDir = join(tempRoot, "no-contacts-here")): HubConfig {
   return {
     relayUrl: "http://localhost:8787",
     tenantId: "test",
@@ -192,6 +197,7 @@ function configFor(dbPath: string): HubConfig {
     mailboxPollMs: 3_000,
     imessagePollMs: POLL_MS,
     imessageDbPath: dbPath,
+    contactsDir,
     version: "test",
   };
 }
@@ -204,6 +210,62 @@ async function until(predicate: () => boolean, what: string, timeoutMs = 3000): 
   }
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// ---- Contacts fixture ---------------------------------------------------------
+
+/** The subset of the Contacts (Core Data) schema the directory reads, with the same table and column names as AddressBook-v22.abcddb. */
+const CONTACTS_SCHEMA = `
+  CREATE TABLE ZABCDRECORD (Z_PK INTEGER PRIMARY KEY, Z_ENT INTEGER, ZFIRSTNAME VARCHAR, ZLASTNAME VARCHAR, ZNICKNAME VARCHAR, ZORGANIZATION VARCHAR);
+  CREATE TABLE ZABCDPHONENUMBER (Z_PK INTEGER PRIMARY KEY, ZOWNER INTEGER, ZFULLNUMBER VARCHAR, ZLABEL VARCHAR);
+  CREATE TABLE ZABCDEMAILADDRESS (Z_PK INTEGER PRIMARY KEY, ZOWNER INTEGER, ZADDRESS VARCHAR, ZADDRESSNORMALIZED VARCHAR, ZLABEL VARCHAR);
+`;
+
+type ContactCard = { first?: string; last?: string; nick?: string; org?: string; phones?: string[]; emails?: string[] };
+
+/** Writes one Contacts database at `file` (creating folders) and returns a function that adds more cards to it later. */
+function writeContactsDb(file: string, cards: ContactCard[]): (more: ContactCard[]) => void {
+  mkdirSync(dirname(file), { recursive: true });
+  const db = new Database(file);
+  db.exec(CONTACTS_SCHEMA);
+  const add = (list: ContactCard[]) => {
+    const insertRecord = db.prepare("INSERT INTO ZABCDRECORD(Z_ENT, ZFIRSTNAME, ZLASTNAME, ZNICKNAME, ZORGANIZATION) VALUES(22, ?, ?, ?, ?)");
+    const insertPhone = db.prepare("INSERT INTO ZABCDPHONENUMBER(ZOWNER, ZFULLNUMBER) VALUES(?, ?)");
+    const insertEmail = db.prepare("INSERT INTO ZABCDEMAILADDRESS(ZOWNER, ZADDRESS, ZADDRESSNORMALIZED) VALUES(?, ?, ?)");
+    for (const c of list) {
+      const pk = Number(insertRecord.run(c.first ?? null, c.last ?? null, c.nick ?? null, c.org ?? null).lastInsertRowid);
+      for (const p of c.phones ?? []) insertPhone.run(pk, p);
+      for (const e of c.emails ?? []) insertEmail.run(pk, e, e.toLowerCase());
+    }
+  };
+  add(cards);
+  return add;
+}
+
+/** A Contacts folder laid out like ~/Library/Application Support/AddressBook: one database per account under Sources/. */
+function buildContactsDir(name: string, sources: Record<string, ContactCard[]>): { dir: string; add: Record<string, (more: ContactCard[]) => void> } {
+  const dir = mkdtempSync(join(tempRoot, name + "-contacts-"));
+  const add: Record<string, (more: ContactCard[]) => void> = {};
+  for (const [source, cards] of Object.entries(sources)) {
+    add[source] = writeContactsDb(join(dir, "Sources", source, CONTACTS_DB_FILENAME), cards);
+  }
+  return { dir, add };
+}
+
+function storedConversation(conversationId: string, name: string, handles: string[], isGroup = false): ConversationState {
+  return {
+    v: 1,
+    service: "imessage",
+    conversationId,
+    name,
+    isGroup,
+    messages: [],
+    lastMessageAt: new Date().toISOString(),
+    preview: "",
+    unread: false,
+    unreadCount: 0,
+    link: { imessage: { handles, chatGuid: conversationId } },
+  };
+}
 
 // ---- attributedBody decoder -------------------------------------------------
 
@@ -253,7 +315,136 @@ describe("date conversion", () => {
 
 // ---- connector against a fixture database -----------------------------------
 
+describe("Contacts directory", () => {
+  test("phone numbers match however Contacts formatted them, emails match regardless of case", () => {
+    const { dir } = buildContactsDir("lookup", {
+      A: [
+        { first: "Alice", last: "Example", phones: ["(555) 010-0001"], emails: ["Alice@Example.com"] },
+        { first: "Bob", last: "Builder", phones: ["+1 555-010-0002 x12"] },
+        { first: "Dana", phones: ["+44 20 7946 0958"] },
+        { org: "Acme Dental", phones: ["555-010-0004;1137"] },
+        { nick: "Coach", phones: ["+15550100005"] },
+        { first: "", last: " ", phones: ["+15550100006"] }, // a card with no usable name never names a handle
+        { first: "Short", last: "Code", phones: ["86753"] },
+      ],
+    });
+    const contacts = new ContactsDirectory(dir);
+    assert.equal(contacts.refresh(), true, "first refresh loads");
+    assert.equal(contacts.refresh(), false, "nothing changed since");
+    assert.equal(contacts.status().files.length, 1);
+    assert.equal(contacts.status().detail, "");
+
+    assert.equal(contacts.nameFor("+15550100001"), "Alice Example", "a national number matches the +1 handle");
+    assert.equal(contacts.nameFor("alice@example.com"), "Alice Example");
+    assert.equal(contacts.nameFor("+15550100002"), "Bob Builder", "the extension is ignored");
+    assert.equal(contacts.nameFor("+442079460958"), "Dana", "spaces in an international number are ignored");
+    assert.equal(contacts.nameFor("+15550100004"), "Acme Dental", "organization when the card has no person name");
+    assert.equal(contacts.nameFor("+15550100005"), "Coach", "nickname before organization");
+    assert.equal(contacts.nameFor("+15550100006"), "+15550100006", "a nameless card leaves the handle");
+    assert.equal(contacts.nameFor("86753"), "Short Code", "short codes match exactly");
+    assert.equal(contacts.nameFor("+15550100099"), "+15550100099", "unknown numbers stay numbers");
+    assert.equal(contacts.nameFor("nobody@example.com"), "nobody@example.com");
+    assert.equal(contacts.lookup(""), null);
+  });
+
+  test("the first account's card wins when two accounts hold the same number", () => {
+    const { dir } = buildContactsDir("precedence", {
+      "A-first": [{ first: "Work", last: "Card", phones: ["+15550100001"] }],
+      "B-second": [{ first: "Home", last: "Card", phones: ["+15550100001"], emails: ["only@second.example"] }],
+    });
+    const contacts = new ContactsDirectory(dir);
+    contacts.refresh();
+    assert.equal(contacts.status().files.length, 2);
+    assert.equal(contacts.nameFor("+15550100001"), "Work Card");
+    assert.equal(contacts.nameFor("only@second.example"), "Home Card", "the second account still contributes handles the first lacks");
+  });
+
+  test("a missing folder or an unreadable database is a detail, never a throw", () => {
+    const missing = new ContactsDirectory(join(tempRoot, "does-not-exist"));
+    assert.equal(missing.refresh(), true);
+    assert.equal(missing.nameFor("+15550100001"), "+15550100001");
+    assert.match(missing.status().detail, /No Contacts database found/);
+    assert.equal(missing.refresh(), false);
+
+    const dir = mkdtempSync(join(tempRoot, "broken-contacts-"));
+    mkdirSync(join(dir, "Sources", "X"), { recursive: true });
+    const db = new Database(join(dir, "Sources", "X", CONTACTS_DB_FILENAME));
+    db.exec("CREATE TABLE ZABCDRECORD (Z_PK INTEGER PRIMARY KEY, ZFIRSTNAME VARCHAR, ZLASTNAME VARCHAR, ZNICKNAME VARCHAR, ZORGANIZATION VARCHAR)"); // no phone table
+    db.close();
+    const broken = new ContactsDirectory(dir);
+    assert.equal(broken.refresh(), true);
+    assert.equal(broken.status().files.length, 0);
+    assert.match(broken.status().detail, /Contacts could not be read/);
+    assert.match(broken.status().detail, /no table "ZABCDPHONENUMBER"/);
+  });
+
+  test("helpers: digits and display names", () => {
+    assert.equal(digitsOf("+1 (703) 550-1177"), "17035501177");
+    assert.equal(digitsOf("888-589-3839;1137"), "8885893839");
+    assert.equal(digitsOf("555-0100 x123"), "5550100");
+    assert.equal(displayNameOf({ ZFIRSTNAME: " Ada ", ZLASTNAME: "Lovelace", ZNICKNAME: "A", ZORGANIZATION: "Analytical" }), "Ada Lovelace");
+    assert.equal(displayNameOf({ ZFIRSTNAME: null, ZLASTNAME: "Lovelace", ZNICKNAME: null, ZORGANIZATION: null }), "Lovelace");
+    assert.equal(displayNameOf({ ZFIRSTNAME: null, ZLASTNAME: null, ZNICKNAME: null, ZORGANIZATION: null }), null);
+  });
+});
+
 describe("iMessage connector", () => {
+  test("names conversations and senders from Contacts, and renames stored conversations when Contacts changes", async () => {
+    const f = buildFixture("contacts");
+    seedScenario(f);
+    const contacts = buildContactsDir("connector", {
+      iCloud: [
+        { first: "Alice", last: "Example", phones: ["(555) 010-0001"] },
+        { first: "Bob", last: "Example", emails: ["Bob@Example.com"] },
+      ],
+    });
+    const host = fakeHost();
+    const store = new HubStore(":memory:");
+    // A conversation stored before Contacts was readable, named by its handle, as this build's earlier runs left them.
+    store.putConversation(storedConversation("iMessage;-;+15550100001", f.handles.alice, [f.handles.alice]));
+    const connector = createIMessageConnector({ host, store, config: configFor(f.dbPath, contacts.dir), log: silentLog });
+
+    await connector.start();
+    try {
+      assert.equal(connector.status().state, "connected", connector.status().detail);
+      assert.match(connector.status().detail, /Names come from Contacts \(2 phone numbers and emails known\)/);
+
+      const [m1, m2, m3] = host.events as [InboxEvent, InboxEvent, InboxEvent];
+      assert.equal(m1.conversationName, "Alice Example", "one-to-one named by the contact");
+      assert.equal(m1.senderName, "Alice Example");
+      assert.deepEqual(m1.link.imessage?.handles, [f.handles.alice], "the Reply link still carries the handle");
+      assert.equal(m2.senderName, "Me");
+      assert.equal(m3.conversationName, "Weekend plans", "a group's own name wins over its members");
+      assert.equal(m3.senderName, "Bob Example", "the sender's email resolves case-insensitively");
+
+      // The stored conversation was renamed on the first poll. (The hub's normalizer would store the new name; do that here.)
+      assert.deepEqual(host.renames, [{ conversationId: "iMessage;-;+15550100001", name: "Alice Example" }]);
+      store.putConversation(storedConversation("iMessage;-;+15550100001", "Alice Example", [f.handles.alice]));
+
+      // A group with no name of its own lists its members by contact name, falling back to the handle.
+      f.db.prepare("UPDATE chat SET display_name = NULL WHERE ROWID = ?").run(f.chats.group);
+      f.insertMessage({ guid: "m-6", text: "Renamed away", chatId: f.chats.group });
+      await until(() => host.events.length === 6, "the group message");
+      assert.equal(host.events[5]!.conversationName, `Bob Example, ${f.handles.carol}`);
+
+      // Carol gets a card later: the next poll re-reads Contacts and renames the stored conversation.
+      store.putConversation(storedConversation("iMessage;+;chat123456789", `Bob Example, ${f.handles.carol}`, [f.handles.bob, f.handles.carol], true));
+      host.renames.length = 0;
+      contacts.add.iCloud!([{ first: "Carol", last: "Example", phones: ["+1 555 010 0003"] }]);
+      await until(() => host.renames.length === 1, "the rename after Contacts changed");
+      assert.deepEqual(host.renames, [{ conversationId: "iMessage;+;chat123456789", name: "Bob Example, Carol Example" }]);
+      assert.match(connector.status().detail, /3 phone numbers and emails known/);
+
+      f.insertMessage({ guid: "m-7", text: "I'm in", chatId: f.chats.group, handleId: 3 });
+      await until(() => host.events.length === 7, "carol's message");
+      assert.equal(host.events[6]!.senderName, "Carol Example");
+    } finally {
+      await connector.stop();
+      store.close();
+      f.db.close();
+    }
+  });
+
   test("reads the seed window, then only new rows, with the cursor persisted", async () => {
     const f = buildFixture("flow");
     seedScenario(f);

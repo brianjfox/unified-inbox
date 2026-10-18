@@ -16,6 +16,8 @@ export type HubConfig = {
   imessagePollMs: number;
   /** Path to the Messages database. */
   imessageDbPath: string;
+  /** Folder holding the Contacts databases that name iMessage handles. */
+  contactsDir: string;
   version: string;
 };
 
@@ -38,6 +40,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     mailboxPollMs: Number(env.HUB_MAILBOX_POLL_MS ?? 3_000),
     imessagePollMs: Number(env.HUB_IMESSAGE_POLL_MS ?? 15_000),
     imessageDbPath: env.HUB_IMESSAGE_DB ?? join(homedir(), "Library", "Messages", "chat.db"),
+    contactsDir: env.HUB_CONTACTS_DIR ?? join(homedir(), "Library", "Application Support", "AddressBook"),
     version: env.HUB_VERSION ?? "0.1.0",
   };
 }

@@ -6,6 +6,7 @@ import type { HubStore } from "../store.ts";
 import type { ConnectorHost, IMessageConnector, Logger } from "./types.ts";
 import { ReadBackUnavailableError } from "./types.ts";
 import { decodeAttributedBody } from "./imessage/attributed-body.ts";
+import { ContactsDirectory } from "./imessage/contacts.ts";
 
 /**
  * The iMessage connector (FR-2, FR-6, FR-8; build-plan task 6).
@@ -14,6 +15,11 @@ import { decodeAttributedBody } from "./imessage/attributed-body.ts";
  * every new message to the hub as an InboxEvent. Messages owns the file, so
  * the connector never writes to it: read-back is the approved fallback
  * (ADR-6, QUESTIONS.md item 3) and markRead throws ReadBackUnavailableError.
+ *
+ * Conversations and senders are named the way Messages shows them: by the
+ * Contacts card for the handle when there is one, otherwise by the phone
+ * number or email. Contacts is re-read when it changes on disk, and every
+ * stored conversation whose name changes as a result is renamed.
  *
  * Every failure to read is a status on the Connections card, never a crash
  * of the hub (NFR-8): a missing Full Disk Access grant maps to
@@ -71,10 +77,13 @@ type MessageRow = {
   sender_handle: string | null;
 };
 
+type ChatRow = { chat_rowid: number; chat_identifier: string | null; display_name: string | null; style: number | null };
+
 type Statements = {
   batch: Database.Statement<[number], MessageRow>;
   seedCursor: Database.Statement<[number], { cursor: number | null }>;
   participants: Database.Statement<[number], { id: string }>;
+  chatByGuid: Database.Statement<[string], ChatRow>;
 };
 
 export class SchemaMismatchError extends Error {}
@@ -101,12 +110,14 @@ class IMessageConnectorImpl implements IMessageConnector {
   private readonly store: HubStore;
   private readonly config: HubConfig;
   private readonly log: Logger;
+  private readonly contacts: ContactsDirectory;
 
   constructor(host: ConnectorHost, store: HubStore, config: HubConfig, log: Logger) {
     this.host = host;
     this.store = store;
     this.config = config;
     this.log = log;
+    this.contacts = new ContactsDirectory(config.contactsDir);
   }
 
   status(): IMessageStatus {
@@ -189,7 +200,17 @@ class IMessageConnectorImpl implements IMessageConnector {
   private poll(): void {
     if (!this.running || this.paused) return;
     const statements = this.statements ?? this.open();
-    this.setStatus("connected", `Reading ${this.config.imessageDbPath} every ${Math.round(this.config.imessagePollMs / 1000)}s. Read-back is unavailable: opening a conversation marks it read here and on every machine, not in Messages.`);
+    const contactsChanged = this.contacts.refresh();
+    if (contactsChanged) {
+      const c = this.contacts.status();
+      this.log.info("contacts loaded", { files: c.files.length, handles: c.handles, ...(c.detail ? { detail: c.detail } : {}) });
+    }
+    this.setStatus(
+      "connected",
+      `Reading ${this.config.imessageDbPath} every ${Math.round(this.config.imessagePollMs / 1000)}s. ${contactsDetail(this.contacts)} ` +
+        "Read-back is unavailable: opening a conversation marks it read here and on every machine, not in Messages.",
+    );
+    if (contactsChanged) this.renameStoredConversations(statements);
 
     let cursor = this.readCursor(statements);
     const participantsByChat = new Map<number, string[]>();
@@ -243,10 +264,11 @@ class IMessageConnectorImpl implements IMessageConnector {
       participants = statements.participants.all(row.chat_rowid).map((h) => h.id);
       participantsByChat.set(row.chat_rowid, participants);
     }
-    const isGroup = row.style === STYLE_GROUP || (row.style !== STYLE_ONE_TO_ONE && participants.length > 1);
-    const conversationName = conversationNameOf(row, participants, isGroup);
+    const isGroup = isGroupChat(row.style, participants);
+    const conversationName = conversationNameOf(row, participants, isGroup, this.contacts);
     const senderIsMe = (row.is_from_me ?? 0) !== 0;
-    const senderName = senderIsMe ? "Me" : (row.sender_handle ?? row.chat_identifier ?? conversationName);
+    const senderHandle = row.sender_handle ?? row.chat_identifier;
+    const senderName = senderIsMe ? "Me" : senderHandle ? this.contacts.nameFor(senderHandle) : conversationName;
 
     return {
       v: 1,
@@ -261,6 +283,29 @@ class IMessageConnectorImpl implements IMessageConnector {
       sentAt: appleDateToIso(row.date ?? 0),
       link: { imessage: { handles: participants, chatGuid: row.chat_guid } },
     };
+  }
+
+  /**
+   * After Contacts changed: recompute the name of every stored iMessage
+   * conversation from the current chat row and directory, and tell the hub
+   * about the ones that differ. Messages already in the thread keep the
+   * sender label they were stored with; new ones carry the new name.
+   */
+  private renameStoredConversations(statements: Statements): void {
+    let renamed = 0;
+    for (const { state } of this.store.allConversations()) {
+      if (state.service !== "imessage") continue;
+      const chat = statements.chatByGuid.get(state.conversationId);
+      if (!chat) continue;
+      const participants = statements.participants.all(chat.chat_rowid).map((h) => h.id);
+      const row = { ...chat, chat_guid: state.conversationId };
+      const name = conversationNameOf(row, participants, isGroupChat(chat.style, participants), this.contacts);
+      if (name && name !== state.name) {
+        this.host.onConversationRenamed("imessage", state.conversationId, name);
+        renamed++;
+      }
+    }
+    if (renamed > 0) this.log.info("conversations renamed from Contacts", { count: renamed });
   }
 
   // ---- database ----------------------------------------------------------
@@ -296,6 +341,7 @@ class IMessageConnectorImpl implements IMessageConnector {
           `SELECT h.id FROM chat_handle_join chj JOIN handle h ON h.ROWID = chj.handle_id
            WHERE chj.chat_id = ? ORDER BY h.ROWID ASC`,
         ),
+        chatByGuid: db.prepare(`SELECT ROWID AS chat_rowid, chat_identifier, display_name, style FROM chat WHERE guid = ?`),
       };
       // Touch the file now: SQLite opens lazily, and a denied read surfaces here rather than in the constructor.
       statements.seedCursor.get(0);
@@ -375,12 +421,32 @@ function bodyOf(row: MessageRow): string | null {
   return null;
 }
 
-function conversationNameOf(row: MessageRow, participants: string[], isGroup: boolean): string {
+function isGroupChat(style: number | null, participants: string[]): boolean {
+  return style === STYLE_GROUP || (style !== STYLE_ONE_TO_ONE && participants.length > 1);
+}
+
+/** The group's own name when it has one; otherwise the participants' Contacts names (or handles). */
+function conversationNameOf(
+  row: Pick<MessageRow, "display_name" | "chat_identifier" | "chat_guid">,
+  participants: string[],
+  isGroup: boolean,
+  contacts: ContactsDirectory,
+): string {
   const display = row.display_name?.trim();
   if (display) return display;
-  if (!isGroup) return participants[0] ?? row.chat_identifier ?? row.chat_guid ?? "";
-  if (participants.length > 0) return participants.join(", ");
+  if (!isGroup) {
+    const handle = participants[0] ?? row.chat_identifier;
+    return handle ? contacts.nameFor(handle) : (row.chat_guid ?? "");
+  }
+  if (participants.length > 0) return participants.map((h) => contacts.nameFor(h)).join(", ");
   return row.chat_identifier ?? row.chat_guid ?? "";
+}
+
+function contactsDetail(contacts: ContactsDirectory): string {
+  const c = contacts.status();
+  if (c.files.length === 0) return c.detail;
+  const known = `Names come from Contacts (${c.handles} phone numbers and emails known).`;
+  return c.detail ? `${known} ${c.detail}` : known;
 }
 
 /** Messages stores dates as nanoseconds since 2001-01-01 (seconds on macOS before High Sierra). */
