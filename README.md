@@ -48,7 +48,7 @@ That one command:
 3. starts the relay on `http://localhost:8787`, which runs its migrations and serves the GUI,
 4. starts the connector hub pointed at that relay, with its data in `tmp/hub` and its keychain items under the service name `com.unified-inbox.hub.dev`.
 
-Open `http://localhost:8787/`. The browser enrolls itself as a viewer; the hub approves the first viewer automatically (see `QUESTIONS.md`, item 1). No account and no key are needed to get this far. Slack and WhatsApp are connected later from the Connections screen; until then each card says what to do. iMessage needs Full Disk Access for the `node` binary (System Settings → Privacy & Security → Full Disk Access), after which the next poll picks it up without a restart.
+Open `http://localhost:8787/`. The browser enrolls itself as a viewer; the hub approves the first viewer automatically (see `QUESTIONS.md`, item 1). No account and no key are needed to get this far. Slack and WhatsApp are connected later from the Connections screen; until then each card says what to do. iMessage needs Full Disk Access for the `node` binary (System Settings → Privacy & Security → Full Disk Access), after which the next poll picks it up without a restart. The same grant lets the hub read Contacts, so iMessage conversations and senders carry the names from your Contacts cards rather than bare phone numbers.
 
 How to tell it is running: `curl http://localhost:8787/api/health` answers `{"ok":true,...}`; the GUI's sidebar shows "Mac hub online"; the Connections screen's hub card shows a recent heartbeat.
 
@@ -85,6 +85,7 @@ The relay tests include the server-side plaintext inspection (AC-18) and the dev
 | `HUB_KEYCHAIN_SERVICE` | no (`com.unified-inbox.hub`) | Keychain service name for the hub's keys and tokens. |
 | `HUB_HEARTBEAT_MS`, `HUB_MAILBOX_POLL_MS`, `HUB_IMESSAGE_POLL_MS` | no (30000, 3000, 15000) | Timers. |
 | `HUB_IMESSAGE_DB` | no (`~/Library/Messages/chat.db`) | Path to the Messages database. |
+| `HUB_CONTACTS_DIR` | no (`~/Library/Application Support/AddressBook`) | Folder of Contacts databases used to name iMessage conversations and senders. |
 | `HUB_LOG_LEVEL` | no (`info`) | `debug`, `info`, `warn`, `error`. |
 
 No service credential is ever an environment variable: Slack app settings and tokens are entered on the Connections screen and stored in the keychain; the WhatsApp session is linked by QR code from the same screen.
@@ -134,7 +135,7 @@ Each viewer enrolls itself on first open and waits for approval. The hub approve
 
 ### 4. Slack, WhatsApp, iMessage
 
-On the Connections screen: open **Slack app settings** once, create the Slack app it describes (public distribution on, Socket Mode on with an app-level token, user event subscriptions `message.im` and `message.mpim`, the listed user-token scopes, and the shown redirect URL), save the client ID, client secret and app-level token, then **Connect a workspace** and approve at Slack, once per workspace. For WhatsApp, **Show QR code** and scan from the phone (WhatsApp → Settings → Linked devices). iMessage needs only Full Disk Access on the Mac.
+On the Connections screen: open **Slack app settings** once, create the Slack app it describes (public distribution on, Socket Mode on with an app-level token, user event subscriptions `message.im` and `message.mpim`, the listed user-token scopes, and the shown redirect URL), save the client ID, client secret and app-level token, then **Connect a workspace** and approve at Slack, once per workspace. For WhatsApp, **Show QR code** and scan from the phone (WhatsApp → Settings → Linked devices). iMessage needs only Full Disk Access on the Mac; it names conversations from Contacts and re-reads Contacts whenever it changes.
 
 ### 5. Seed
 

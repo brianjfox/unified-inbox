@@ -90,6 +90,8 @@ Whether your Mac is online and when it last checked in. **Restart hub** restarts
 
 Whether the Mac can read Messages. If it says Full Disk Access is missing, open System Settings → Privacy & Security → Full Disk Access on the Mac and add the program the card names; the next check picks it up. **Pause** stops reading Messages until you press **Resume**.
 
+Conversations and senders are labelled the way Messages labels them: with the name on the Contacts card for that phone number or email, and with the number or address itself when there is no card. Add or fix a card in Contacts on the Mac and the conversation is renamed at the next check, within about fifteen seconds. The card's status line says how many numbers and addresses Contacts knows, or why Contacts could not be read.
+
 ### Slack
 
 ![The Slack card: connected workspaces, Connect a workspace, and the one-time app settings.](manual/13-card-slack.png)
