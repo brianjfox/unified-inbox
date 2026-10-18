@@ -158,7 +158,7 @@ bun run dev                                                   # terminal 1
 HUB_PID=$(pgrep -f connector-hub/src/main.ts) bun run manual:screenshots   # terminal 2
 ```
 
-It drives a headless browser through the main flow (enrollment and approval, the inbox, a thread, search, phone width, Connections, mark all read, and the hub-offline state, which it produces by pausing the hub for the staleness window) and writes `docs/manual/*.png`. The pictures show whatever is in the inbox at the time, so review them before sharing the manual.
+It drives a headless browser through the main flow (enrollment and approval, the inbox, a thread, search, phone width, Connections, mark all read, and the hub-offline state, which it produces by pausing the hub for the staleness window) and writes `docs/manual/*.png`. The pictures show whatever is in the inbox at the time, so the names that identify people (conversation titles, the reading-pane title, and group chats' sender labels and previews) are blurred before each capture; set `MANUAL_BLUR=0` to capture them unblurred. Message text is not blurred, so review the pictures before sharing the manual. The browser the script drives enrolls as a viewer; when another viewer is already approved, approve it from the Connections screen's sync card while the script waits.
 
 ## Operations
 
