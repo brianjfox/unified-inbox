@@ -81,11 +81,15 @@ code {
 }
 
 /* ---------- screen frame ---------- */
+/* The screen is exactly the viewport tall: the conversation list, the thread
+   and the Connections cards scroll inside it, so the sidebar and the top bar
+   never scroll away. */
 .screen {
   display: block;
   max-width: 1280px;
   margin: 0 auto;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
   background: var(--panel);
   border-left: 1px solid var(--line);
   border-right: 1px solid var(--line);
@@ -94,7 +98,8 @@ code {
 .app {
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
 }
 
 /* ---------- sidebar ---------- */
@@ -193,6 +198,8 @@ code {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
 }
 .topbar {
   display: flex;
@@ -281,6 +288,7 @@ code {
 .split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  grid-template-rows: minmax(0, 1fr);
   flex: 1;
   min-height: 0;
 }
@@ -294,6 +302,7 @@ code {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-height: 0;
   overflow-y: auto;
 }
 .conv {
@@ -434,6 +443,7 @@ code {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 .pane-back {
   display: none;
@@ -783,6 +793,7 @@ summary.btn::-webkit-details-marker {
   }
   .app {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
     min-height: 0;
   }
   .sidebar {
@@ -819,6 +830,7 @@ summary.btn::-webkit-details-marker {
   }
   .split {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
   }
   .convlist {
     border-right: 0;
