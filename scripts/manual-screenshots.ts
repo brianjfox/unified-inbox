@@ -8,6 +8,11 @@
  * it takes by pausing the hub with SIGSTOP for the staleness window and then
  * resuming it.
  *
+ * The pictures show whatever is in the inbox at the time, so the names that
+ * identify people (conversation titles, the reading-pane title, and the
+ * sender labels and previews of group chats) are blurred before each capture.
+ * Set MANUAL_BLUR=0 to capture them as they are.
+ *
  *   bun run dev            # in one terminal
  *   HUB_PID=<pid> bun run scripts/manual-screenshots.ts
  */
@@ -16,6 +21,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 const BASE = process.env.GUI_URL ?? "http://localhost:8787";
+const BLUR = process.env.MANUAL_BLUR !== "0";
 const OUT = new URL("../docs/manual/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 
@@ -64,15 +70,52 @@ async function highlight(page: Page, testId: string | null, label: string) {
   }, { testId, label });
 }
 
+/** Blurs the elements that name people. Re-applied before every capture because the app re-renders between steps. */
+async function blurNames(page: Page) {
+  if (!BLUR) return;
+  await page.evaluate(() => {
+    if (!document.querySelector("style[data-manual-blur]")) {
+      const style = document.createElement("style");
+      style.setAttribute("data-manual-blur", "1");
+      style.textContent = `.conv-name, .pane-head h3, .msg strong, [data-manual-blur-preview] { filter: blur(6px); }`;
+      document.head.append(style);
+    }
+    document.querySelectorAll(".conv").forEach((row) => {
+      const name = row.querySelector(".conv-name")?.textContent ?? "";
+      const preview = row.querySelector(".conv-preview");
+      if (preview && name.endsWith("· group")) preview.setAttribute("data-manual-blur-preview", "1");
+    });
+  });
+}
+
 async function shot(page: Page, name: string, testId: string | null, label: string) {
   await highlight(page, testId, label);
+  await blurNames(page);
   await page.screenshot({ path: join(OUT, `${name}.png`) });
   console.log(`captured ${name}.png`);
 }
 
 async function waitForInbox(page: Page) {
   // The hub approves the first viewer within about 15 seconds; the first sync follows.
-  await page.waitForSelector('[data-testid="conversation-list"]', { timeout: 120_000 });
+  await Promise.race([
+    page.waitForSelector('[data-testid="conversation-list"]', { timeout: 120_000 }),
+    page.waitForSelector('[data-testid="empty-state"]', { timeout: 120_000 }),
+  ]);
+  // When nothing is unread (a previous run ends with Mark all read) the inbox
+  // shows the empty state instead of the list. Show the read conversations and
+  // mark the first few unread so the pictures show unread rows and counts; the
+  // Mark all read step below puts everything back as it was.
+  if ((await page.locator('[data-testid="empty-state"]').count()) > 0) {
+    await page.click('[data-testid="button-show-read"]');
+    await page.waitForSelector('[data-testid="conversation-list"]', { timeout: 10_000 });
+    const toggles = page.locator('[data-testid^="button-row-mark-unread-"]');
+    const n = Math.min(3, await toggles.count());
+    for (let i = 0; i < n; i++) {
+      await page.locator('[data-testid^="button-row-mark-unread-"]').first().click();
+      await page.waitForFunction((want) => document.querySelectorAll('[data-testid="conversation-list"] .conv.unread').length >= want, i + 1, { timeout: 15_000 });
+    }
+    console.log(`marked ${n} conversations unread for the pictures`);
+  }
 }
 
 // A persistent profile: the browser is one device, enrolled once, and a rerun
@@ -88,7 +131,19 @@ try {
     page.waitForSelector('[data-testid="loading-skeleton-list"]', { timeout: 30_000 }).then(() => "loading" as const),
     page.waitForSelector('[data-testid="conversation-list"]', { timeout: 30_000 }).then(() => "inbox" as const),
   ]);
-  if (first === "loading") await shot(page, "08-loading", "loading-sync-status", "Status while connecting");
+  // A device that is already approved syncs from its local cache in well under a
+  // second, so the loading state may be gone before it can be captured; the
+  // picture from the first run (a fresh enrollment) is kept in that case. To
+  // retake it, delete tmp/manual-browser-profile so the browser enrolls anew.
+  if (first === "loading" && (await page.locator('[data-testid="loading-sync-status"]').count()) > 0) {
+    try {
+      await shot(page, "08-loading", "loading-sync-status", "Status while connecting");
+    } catch (err) {
+      console.log(`skipped 08-loading.png: ${err instanceof Error ? err.message.split("\n")[0] : err}`);
+    }
+  } else {
+    console.log("skipped 08-loading.png: the sync finished before it could be captured (existing picture kept)");
+  }
   await waitForInbox(page);
   await page.waitForTimeout(1500);
   await shot(page, "01-inbox", "conversation-list", "Every conversation, newest first");
