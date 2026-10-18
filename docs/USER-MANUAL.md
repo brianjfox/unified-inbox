@@ -26,6 +26,8 @@ The sidebar narrows the list: **All**, **Unread**, **iMessage**, **Slack**, or *
 
 ![Opening a conversation: the thread appears in the reading pane and the row is marked read.](manual/03-reading-pane.png)
 
+The thread shows the newest message at the top, so what just arrived is the first thing you read; older messages follow below it.
+
 Click a row to open it on the right. Opening a conversation is what marks it read, here, on your other machines, and back in the source app, so its badge there clears too. Nothing is marked read by accident: hovering or scrolling changes nothing.
 
 For iMessage, the Messages app on your Mac keeps its own badge. The inbox marks the conversation read here and on your other machines, but the Messages badge stays as it was; Apple offers no safe way to clear it from outside Messages.
