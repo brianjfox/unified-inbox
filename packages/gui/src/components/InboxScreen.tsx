@@ -423,8 +423,8 @@ function ReadingThread({
         <h3>{displayName(state)}</h3>
         <span className="sub">{paneSubline(state, app, offline)}</span>
       </div>
-      <ul className="msgs" data-testid={tid("message-list")}>
-        {state.messages.map((m, i) => (
+      <ul className="msgs" data-testid={tid("message-list")} aria-label="Messages, newest first">
+        {[...state.messages].reverse().map((m, i) => (
           <li className={`msg${m.senderIsMe ? " mine" : ""}`} key={m.id} data-testid={tid(`message-${i + 1}`)}>
             {state.isGroup ? <strong>{m.senderIsMe ? "You" : m.senderName}: </strong> : null}
             {m.body}
